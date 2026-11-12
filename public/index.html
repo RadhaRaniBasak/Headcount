@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Headcount: matching that counts people, not dollars</title>
+<meta name="description" content="A quadratic matching round on the PayPal sandbox. The pool follows how many verified people give, not how much.">
+<style>
+  /* A dot is a person. Solid = counted. Ring = paid, not counted. Marigold = pool money. */
+  :root {
+    --paper: #edf2ec; --panel: #f9fbf7; --ink: #10231d; --soft: #486057; --rule: #c3d1c5;
+    --pine: #1c5a46; --marigold: #e3a008; --ring: #7f968b; --alert: #9b2c1a;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 1rem/1.5 "Avenir Next", "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", "Noto Sans", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap { max-width: 68rem; margin: 0 auto; padding-inline: 1.25rem; }
+  h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; margin: 0; }
+  h1 { font-size: clamp(2.1rem, 6vw, 3.9rem); font-weight: 800; max-width: 17ch; }
+  h2 { font-size: 1.6rem; font-weight: 750; }
+  h3 { font-size: 1.1rem; font-weight: 700; }
+  /* Headings break into even lines. Short text avoids leaving one word alone on its last line. */
+  h1, h2, h3, summary { text-wrap: balance; }
+  p, td, #status { text-wrap: pretty; }
+  p { margin: 0; }
+  .soft { color: var(--soft); }
+  .small { font-size: .875rem; }
+  .skip { position: absolute; left: -999px; }
+  .skip:focus { left: 1rem; top: 1rem; background: var(--panel); padding: .5rem .75rem; z-index: 3; }
+  /* Two tones: marigold alone is about 2:1 against the page, so the ink line carries the contrast. */
+  :focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; box-shadow: 0 0 0 2px var(--marigold); }
+  /* Keeps a control that takes keyboard focus clear of the status message at the bottom of the screen. */
+  html, .side { scroll-padding-bottom: 6rem; }
+
+  header { padding-block: 1.5rem 3.5rem; }
+  .top { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: baseline; margin-bottom: 2.5rem; }
+  .brand { font-weight: 800; font-size: 1.15rem; letter-spacing: -0.01em; }
+  .lede { max-width: 46ch; margin-top: 1rem; font-size: 1.15rem; }
+
+  /* The lesson: same money, different crowds */
+  .lesson { list-style: none; margin: 2rem 0 0; padding: 0; border-top: 2px solid var(--ink); }
+  .lesson li { display: grid; grid-template-columns: minmax(0, 1fr) 13rem 14rem; gap: 1.5rem; align-items: center; padding: .7rem 0; border-bottom: 1px solid var(--rule); }
+  .lesson .amount { font-weight: 700; text-align: right; }
+  /* The lesson's height before the round has loaded, so the page below it does not jump down when it arrives. */
+  .lesson:empty { min-height: 15rem; }
+
+  .dots { display: flex; flex-wrap: wrap; gap: 3px; }
+  .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--pine); }
+  .dots i.out { background: none; box-shadow: inset 0 0 0 1.5px var(--ring); }
+  .key { display: inline-flex; gap: .4rem; align-items: center; margin-right: 1rem; }
+
+  .bar { position: relative; height: 12px; background: #dde6dd; border-radius: 6px; }
+  .bar span { position: relative; display: block; height: 100%; background: var(--marigold); border-radius: 6px; transition: width .5s ease; }
+  .bar em, .swatch { background: repeating-linear-gradient(135deg, var(--ring) 0 2px, transparent 2px 6px); border-radius: 6px; }
+  .bar em { position: absolute; left: 0; top: 0; height: 100%; transition: width .5s ease; }
+  .swatch { display: inline-block; width: 28px; height: 10px; }
+  .swatch.fill { background: var(--marigold); }
+  @media (prefers-reduced-motion: reduce) { .bar span, .bar em { transition: none; } }
+
+  main { display: grid; gap: 2.5rem; padding-block: 0 3rem; }
+  /* minmax(0, 1fr) lets a wide table scroll inside its own box. Without it the table widens the whole page on a phone. */
+  main, .below, details > div { grid-template-columns: minmax(0, 1fr); }
+  /* The sticky column is held inside this grid, so it stops before the sections below. */
+  .columns { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 2.5rem; align-items: start; }
+  .section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: .75rem; }
+
+  .projects { list-style: none; margin: 0; padding: 0; border-top: 2px solid var(--ink); }
+  .project { padding: 1.1rem 0; border-bottom: 1px solid var(--rule); display: grid; gap: .55rem; }
+  .project-head { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+  .project-head button { flex: none; white-space: nowrap; }
+
+  .panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; padding: 1.25rem; }
+  .notice { border-left: 6px solid var(--pine); font-weight: 650; }
+  .notice.bad { border-left-color: var(--alert); }
+  .side { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; display: grid; gap: 1.25rem; align-content: start; }
+  .side .panel { display: grid; gap: .7rem; }
+  .basket { list-style: none; margin: 0; padding: 0; }
+  .basket li { display: grid; gap: .3rem; padding: .7rem 0; border-top: 1px solid var(--rule); }
+  .line-head { display: flex; justify-content: space-between; gap: .75rem; align-items: baseline; }
+  .line-pay { display: flex; gap: .6rem; align-items: center; }
+  .line-pay label { margin: 0; font-weight: 500; }
+  .line-pay input { width: 5.5rem; text-align: right; }
+  .error { color: var(--alert); font-weight: 650; }
+
+  label { font-weight: 650; display: block; margin-bottom: .25rem; }
+  input, textarea, button { font: inherit; color: inherit; }
+  input, textarea { width: 100%; padding: .55rem .65rem; border: 1.5px solid var(--ring); border-radius: 8px; background: #fff; }
+  textarea { resize: vertical; min-height: 4.5rem; }
+  button { cursor: pointer; border-radius: 8px; padding: .55rem .9rem; border: 1.5px solid var(--ink); background: transparent; font-weight: 650; }
+  /* Light text on a dark fill looks heavier than dark text on paper. Antialiased rendering evens that out on a Mac. */
+  button.primary { background: var(--pine); border-color: var(--pine); color: #fff; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  button.danger { border-color: var(--alert); color: var(--alert); }
+  /* The padding makes a target 44px tall. The negative margin keeps the basket line as tall as before. */
+  button.plain { border: 0; padding: .65rem .4rem; margin-block: -.45rem; text-decoration: underline; font-weight: 500; }
+  @media (hover: hover) {
+    button:enabled:not([aria-disabled="true"]):hover { background-color: rgb(16 35 29 / .07); }
+    button.primary:enabled:not([aria-disabled="true"]):hover { background-color: #154535; border-color: #154535; }
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  /* Busy: guard() marks a button this way while its action runs. The spinner says "working", where a dimmed button alone reads as "off". */
+  button[aria-disabled="true"] { opacity: .75; cursor: progress; }
+  button[aria-disabled="true"]::after { content: ""; display: inline-block; width: .8em; height: .8em; margin-left: .5em; vertical-align: -.05em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; }
+  @media (prefers-reduced-motion: no-preference) {
+    button { transition-property: background-color, border-color, transform; transition-duration: 150ms; transition-timing-function: ease-out; }
+    button:enabled:not([aria-disabled="true"]):active { transform: scale(.97); }
+    button[aria-disabled="true"]::after { animation: spin .7s linear infinite; }
+  }
+  @keyframes spin { to { transform: rotate(1turn); } }
+  .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: end; }
+  .row.top-aligned { align-items: start; }
+  .row > div { flex: 1 1 8rem; }
+
+  table { width: 100%; border-collapse: collapse; }
+  caption { text-align: left; font-weight: 700; padding-bottom: .4rem; }
+  th, td { text-align: left; padding: .45rem .5rem .45rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: .875rem; color: var(--soft); font-weight: 650; }
+  .num { text-align: right; white-space: nowrap; }
+  .tag { display: inline-block; border: 1.5px solid currentColor; border-radius: 99px; padding: 0 .55rem; font-size: .8rem; font-weight: 700; }
+  .tag.no { color: var(--alert); }
+  .tag.yes { color: var(--pine); }
+
+  .below { display: grid; gap: 2rem; }
+  details { border-top: 2px solid var(--ink); padding-top: 1rem; }
+  summary { font-size: 1.6rem; font-weight: 750; letter-spacing: -0.02em; cursor: pointer; }
+  details > div { display: grid; gap: 1rem; margin-top: 1rem; max-width: 46rem; }
+  /* The rule sits inside the side padding, so it lines up with every other rule on the page. */
+  footer { padding-block: 0 3rem; }
+  footer::before { content: ""; display: block; border-top: 1px solid var(--rule); margin-bottom: 1.5rem; }
+
+  #status { position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%); background: var(--ink); color: #fff; padding: .7rem 1rem; border-radius: 10px; max-width: min(90vw, 34rem); z-index: 2; pointer-events: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  /* Empty, the box has no size. It is not display:none, so screen readers already know this live region when the first message arrives. */
+  #status:empty { padding: 0; }
+  #status.bad { background: var(--alert); } /* a failure. White on this red is 7.6:1 */
+
+  @media (max-width: 860px) {
+    .columns { grid-template-columns: minmax(0, 1fr); }
+    .side { position: static; max-height: none; overflow: visible; order: -1; }
+    .lesson li { grid-template-columns: minmax(0, 1fr); gap: .35rem; }
+    .lesson .amount { text-align: left; }
+    .lesson:empty { min-height: 29rem; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#give">Skip to giving</a>
+
+<header class="wrap">
+  <div class="top">
+    <span class="brand">Headcount</span>
+    <span class="small soft" id="round-note">PayPal sandbox. No real money moves.</span>
+  </div>
+  <h1>Matching that counts people, not dollars.</h1>
+  <p class="lede">Each of these four projects raised $1,000. A $5,000 matching pool was split by how many people gave.</p>
+  <ul class="lesson" id="lesson" aria-label="How the same $1,000 earns a different match"></ul>
+</header>
+
+<main class="wrap">
+  <p class="panel notice" id="notice" role="alert" tabindex="-1" hidden></p>
+ <div class="columns">
+  <section aria-labelledby="round-h">
+    <div class="section-head">
+      <h2 id="round-h" tabindex="-1">The round</h2>
+      <p class="small soft">
+        <span class="key"><span class="dots" aria-hidden="true"><i></i></span> counted</span>
+        <span class="key"><span class="dots" aria-hidden="true"><i class="out"></i></span> paid, not counted</span>
+        <span class="key"><span class="swatch fill" aria-hidden="true"></span> match, as a share of the pool</span>
+        <span class="key"><span class="swatch" aria-hidden="true"></span> match if every payment counted</span>
+      </p>
+    </div>
+    <ul class="projects" id="projects"><li class="project soft" id="loading">Loading the round…</li></ul>
+  </section>
+
+  <div class="side">
+    <section class="panel" id="give" aria-labelledby="give-h">
+      <h2 id="give-h" tabindex="-1">Give</h2>
+      <form id="plan-form">
+        <div class="row top-aligned">
+          <div style="flex: 0 1 7rem">
+            <label for="budget">Budget, $</label>
+            <input id="budget" type="number" min="1" max="500" step="1" value="20" required>
+          </div>
+          <div style="flex: 3 1 12rem">
+            <label for="interests">What do you care about?</label>
+            <textarea id="interests" maxlength="500" required placeholder="Accessibility, tools for Indian languages"></textarea>
+          </div>
+        </div>
+        <button class="primary" id="plan-btn" style="margin-top: .7rem">Plan my gift</button>
+      </form>
+      <p class="small soft" id="plan-note" role="status">Ask for a plan, or add projects from the list.</p>
+      <ul class="basket" id="basket"></ul>
+      <p id="basket-total"></p>
+      <button class="primary" id="pay-btn" type="button" hidden>Pay with PayPal</button>
+      <p class="small soft">One PayPal payment. Each project appears as a line on your receipt.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="pool-h">
+      <h2 id="pool-h" tabindex="-1">Matching pool</h2>
+      <p id="pool"></p>
+      <form id="pool-form" class="row">
+        <div>
+          <label for="pool-amount">Add to the pool, $</label>
+          <input id="pool-amount" type="number" min="1" max="5000" step="1" value="100" required>
+        </div>
+        <button id="pool-btn">Fund the pool with PayPal</button>
+      </form>
+    </section>
+  </div>
+ </div>
+
+  <div class="below">
+    <section aria-labelledby="counted-h">
+      <div class="section-head"><h2 id="counted-h">Who counted</h2></div>
+      <p id="counted" style="max-width: 62ch"></p>
+      <p id="money" style="max-width: 62ch; margin-top: .6rem"></p>
+      <div id="recent" style="margin-top: 1.25rem; overflow-x: auto"></div>
+    </section>
+
+    <details id="organizer">
+      <summary>Organizer</summary>
+      <div>
+        <div>
+          <label for="admin-key">Organizer key</label>
+          <input id="admin-key" type="password" autocomplete="off" style="max-width: 20rem">
+        </div>
+        <div class="row">
+          <button id="fake-btn" type="button">Add 100 fake donors</button>
+          <button id="close-btn" type="button" class="primary">Close round and pay out</button>
+          <button id="reset-btn" type="button" class="danger">Reset demo</button>
+        </div>
+        <p class="small soft">Fake donors are simulated, pay from unverified accounts, and each give $10 to Timezone Data Mirror.</p>
+        <div id="payout" style="overflow-x: auto"></div>
+      </div>
+    </details>
+  </div>
+</main>
+
+<footer class="wrap small soft">
+  <p style="max-width: 70ch">Simulated donors and the simulated pledge are labelled and never move money. One PayPal account is one head per project, however many gifts it makes. A verified PayPal account is not proof of one person.</p>
+</footer>
+
+<div id="status" role="status" aria-live="polite"></div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = (cents) => (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const dots = (counted, out = 0) => `<div class="dots" aria-hidden="true">${'<i></i>'.repeat(counted)}${'<i class="out"></i>'.repeat(out)}</div>`;
+
+let S = null;      // last state from the server
+let seen = '';     // its JSON, so an unchanged poll does not redraw and steal focus
+let basket = [];   // [{ projectId, name, amountCents, reason, deltaCents }]
+let previewTimer;
+
+async function api(path, body, headers = {}) {
+  const res = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) })
+    .catch(() => { throw new Error('Could not reach Headcount. Check your connection and try again.'); }); // the browser's own words are "Failed to fetch"
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
+  return data;
+}
+
+// bad marks a failure, shown in the alert colour. The words say what failed as well, so colour is not the only cue.
+function say(text, bad = false) {
+  $('status').textContent = text;
+  $('status').classList.toggle('bad', bad);
+  clearTimeout(say.timer);
+  say.timer = setTimeout(() => { $('status').textContent = ''; }, 9000);
+}
+
+// Runs an action, shows its error, and keeps the button from being pressed twice.
+// The button is marked aria-disabled, not disabled: a disabled button drops keyboard focus to the top of the page.
+const guard = (fn) => async (event) => {
+  const button = event.submitter ?? event.currentTarget;
+  event.preventDefault();
+  if (button.getAttribute('aria-disabled') === 'true') return;
+  if (button.tagName === 'BUTTON') button.setAttribute('aria-disabled', 'true');
+  try { await fn(event); } catch (err) { say(err.message, true); }
+  button.removeAttribute('aria-disabled');
+  lock();
+};
+
+async function load() {
+  const next = await api('/api/state');
+  const json = JSON.stringify(next);
+  if (json === seen) return;
+  const first = !S;
+  S = next;
+  seen = json;
+  if (first) drawLesson();
+  draw();
+}
+
+function drawLesson() {
+  const top = Math.max(...S.lesson.map((r) => r.matchCents));
+  $('lesson').innerHTML = S.lesson.map((r) => `
+    <li>
+      ${dots(r.donors)}
+      <span>${r.donors} ${r.donors === 1 ? 'donor' : 'donors'} gave ${money(r.giftCents).replace('.00', '')}${r.donors === 1 ? '' : ' each'}</span>
+      <span>
+        <span class="bar" style="display:block" aria-hidden="true"><span style="width:${(r.matchCents / top) * 100}%"></span></span>
+        <span class="amount" style="display:block">${money(r.matchCents)} match</span>
+      </span>
+    </li>`).join('');
+}
+
+function draw() {
+  const open = S.round.status === 'OPEN';
+  $('round-note').textContent = `PayPal ${S.paypalEnv}. No real money moves. Round ${open ? 'open' : 'closed'}.`;
+
+  // A bar is a share of the whole pool. Scaled to the largest match instead, a fake crowd would shrink every real bar.
+  const pct = (cents) => `${(cents / Math.max(1, S.pool.totalCents)) * 100}%`;
+  // The list is rebuilt below. Each bar is drawn at its old width and then given the new one, so it slides instead of jumping.
+  const was = new Map([...$('projects').querySelectorAll('[data-bar]')].map((e) => [e.dataset.bar, e.style.width]));
+  const bar = (tag, key, cents) => `<${tag} data-bar="${esc(key)}" data-to="${pct(cents)}" style="width:${was.get(key) ?? pct(cents)}"></${tag}>`;
+  const held = document.activeElement?.dataset.add; // the redraw replaces the button that has focus, so focus is handed back below
+  $('projects').innerHTML = S.projects.map((p) => {
+    const out = p.donors - p.heads;
+    return `
+    <li class="project">
+      <div class="project-head">
+        <div><h3>${esc(p.name)}</h3><p class="soft">${esc(p.blurb)}</p></div>
+        <button type="button" data-add="${esc(p.id)}" ${open ? '' : 'disabled'} aria-label="Add $5 for ${esc(p.name)}">Add $5</button>
+      </div>
+      ${dots(p.heads, out)}
+      <p class="small">${p.heads} ${p.heads === 1 ? 'head' : 'heads'} counted${out ? `, ${out} not counted` : ''}. Raised ${money(p.raisedCents)}.</p>
+      <div class="bar" aria-hidden="true">${bar('em', `${p.id}-n`, p.naiveMatchCents)}${bar('span', p.id, p.matchCents)}</div>
+      <p><strong>${money(p.matchCents)} match.</strong> <span class="soft">If every payment counted: ${money(p.naiveMatchCents)}.</span></p>
+    </li>`;
+  }).join('');
+  void $('projects').offsetWidth; // puts the old widths on screen first. Set in the same frame, the new ones would not slide
+  for (const e of $('projects').querySelectorAll('[data-to]')) e.style.width = e.dataset.to;
+  if (held) (document.querySelector(`[data-add="${CSS.escape(held)}"]:enabled`) ?? $('round-h')).focus({ preventScroll: true });
+
+  $('pool').innerHTML = `<strong>${money(S.pool.totalCents)}</strong> to share. ${money(S.pool.realCents)} was paid through PayPal ${esc(S.paypalEnv)}, and ${money(S.pool.simulatedCents)} is a simulated pledge.`;
+
+  const t = S.totals;
+  $('counted').innerHTML = `<strong>${t.heads} of ${t.donors} donors counted.</strong> ` + (t.unmatchedDonors
+    ? `${t.unmatchedDonors} paid from accounts PayPal has not verified. Their ${money(t.unmatchedCents)} reached the projects and earned no match.`
+    : 'Every donor so far paid from a verified PayPal account.');
+
+  const m = S.settlement;
+  $('money').innerHTML = m.grossInCents
+    ? `Real money in: ${money(m.grossInCents)}. PayPal fees: ${money(m.feeCents)}. To pay out: ${money(m.paidOutCents)}${m.unallocatedCents ? `, with ${money(m.unallocatedCents)} of pool not yet earned by any project` : ''}.`
+    : '<span class="soft">No sandbox payments yet. The crowd above is simulated, so nothing would be paid out.</span>';
+
+  $('recent').innerHTML = S.recent.length ? `
+    <table>
+      <caption>Sandbox payments</caption>
+      <thead><tr><th scope="col">Time</th><th scope="col">Payer</th><th scope="col">PayPal says</th><th scope="col">Paid for</th><th scope="col" class="num">Fee</th></tr></thead>
+      <tbody>${S.recent.map((o) => `
+        <tr>
+          <td>${esc(new Date(o.at).toLocaleTimeString())}</td>
+          <td>${esc(o.payer)}</td>
+          <td><span class="tag ${o.verified ? 'yes' : 'no'}">${o.verified ? 'Verified' : 'Not verified'}</span></td>
+          <td>${o.lines.map((l) => `${esc(l.name)} ${money(l.amountCents)}`).join('<br>')}</td>
+          <td class="num">${money(o.feeCents)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>` : '';
+
+  const name = (id) => S.projects.find((p) => p.id === id)?.name ?? id;
+  const rows = S.payout ? S.payout.items : m.items.filter((i) => i.amountCents > 0);
+  $('payout').innerHTML = rows.length ? `
+    <table>
+      <caption>${S.payout ? `Payout batch ${esc(S.payout.batchId)}: ${esc(S.payout.status)}` : open ? 'Payout if you close now' : 'Payout not sent yet. Close the round again to send it.'}</caption>
+      <thead><tr><th scope="col">Project</th><th scope="col" class="num">Gifts after fees</th><th scope="col" class="num">Match</th><th scope="col" class="num">Payout</th>${S.payout ? '<th scope="col">Status</th>' : ''}</tr></thead>
+      <tbody>${rows.map((i) => `
+        <tr><td>${esc(name(i.projectId))}</td><td class="num">${money(i.giftsNetCents)}</td><td class="num">${money(i.matchCents)}</td><td class="num">${money(i.amountCents)}</td>${S.payout ? `<td>${esc(i.status)}</td>` : ''}</tr>`).join('')}
+      </tbody>
+    </table>` : '<p class="soft">Nothing real to pay out yet. Fund the pool or make a sandbox gift first.</p>';
+
+  // Written only when it changes: the note is a live region, so a repeat would be read out on every poll.
+  const shut = 'This round is closed. Giving is off.';
+  const said = $('plan-note').textContent;
+  if (!open && said !== shut) $('plan-note').textContent = shut;
+  if (open && said === shut) $('plan-note').textContent = 'Ask for a plan, or add projects from the list.'; // a reset opened a new round
+  scrollers();
+  lock();
+  drawTotals();
+}
+
+// Giving and organizer actions are off once the round is closed.
+// Closing stays on until a payout is recorded, so a payout that PayPal refused can be sent again.
+function lock() {
+  const open = S?.round.status === 'OPEN';
+  for (const id of ['plan-btn', 'pool-btn', 'fake-btn', 'close-btn']) {
+    const button = $(id);
+    const off = id === 'close-btn' ? !S || Boolean(S.payout) : !open;
+    // Disabling the button that has focus would drop focus to the top of the page. Hand it to the section's heading first.
+    if (off && button === document.activeElement) button.closest('section, details').querySelector('h2, summary').focus();
+    button.disabled = off;
+  }
+}
+
+// A table wider than the screen scrolls sideways inside its box. While it does, the box takes keyboard focus so it can be scrolled without a mouse.
+function scrollers() {
+  for (const [id, label] of [['recent', 'Sandbox payments'], ['payout', 'Payout']]) {
+    const box = $(id);
+    const on = box.scrollWidth > box.clientWidth;
+    for (const [name, value] of [['tabindex', '0'], ['role', 'region'], ['aria-label', label]]) on ? box.setAttribute(name, value) : box.removeAttribute(name);
+  }
+}
+
+function drawBasket() {
+  $('basket').innerHTML = basket.map((l) => `
+    <li>
+      <div class="line-head"><strong id="name-${esc(l.projectId)}">${esc(l.name)}</strong><button type="button" class="plain" data-remove="${esc(l.projectId)}" aria-label="Remove ${esc(l.name)}">Remove</button></div>
+      ${l.reason ? `<p class="small soft">${esc(l.reason)}</p>` : ''}
+      <div class="line-pay">
+        <label class="small" id="lab-${esc(l.projectId)}" for="gift-${esc(l.projectId)}">Gift, $</label>
+        <input id="gift-${esc(l.projectId)}" type="number" min="1" max="1000" step="1" value="${l.amountCents / 100}" data-amount="${esc(l.projectId)}" aria-labelledby="name-${esc(l.projectId)} lab-${esc(l.projectId)}" aria-describedby="hint-${esc(l.projectId)}">
+        <span class="small" id="hint-${esc(l.projectId)}" data-delta="${esc(l.projectId)}"></span>
+      </div>
+    </li>`).join('');
+  drawTotals();
+}
+
+// Updates the numbers around the amount fields without redrawing the fields themselves.
+function drawTotals() {
+  const total = basket.reduce((a, l) => a + l.amountCents, 0);
+  const moved = basket.reduce((a, l) => a + (l.deltaCents ?? 0), 0);
+  for (const l of basket) {
+    const cell = document.querySelector(`[data-delta="${CSS.escape(l.projectId)}"]`);
+    if (!cell) continue;
+    const bad = !l.amountCents; // the field holds something other than $1 to $1,000, which is why Pay is off
+    cell.textContent = bad ? 'Enter $1 to $1,000.' : l.deltaCents == null ? '' : `moves ${l.deltaCents < 0 ? '−' : '+'}${money(Math.abs(l.deltaCents))} of match`;
+    cell.classList.toggle('error', bad);
+    const field = $(`gift-${l.projectId}`);
+    bad ? field.setAttribute('aria-invalid', 'true') : field.removeAttribute('aria-invalid');
+  }
+  $('basket-total').innerHTML = basket.length ? `You pay <strong>${money(total)}</strong> once. It moves <strong>${money(moved)}</strong> of the pool toward these projects.` : '';
+  $('pay-btn').hidden = !basket.length;
+  $('pay-btn').textContent = `Pay ${money(total)} with PayPal`;
+  $('pay-btn').disabled = !S || S.round.status !== 'OPEN' || !basket.every((l) => l.amountCents >= 100);
+}
+
+function refreshPreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const lines = basket.filter((l) => l.amountCents >= 100).map(({ projectId, amountCents }) => ({ projectId, amountCents }));
+    if (!lines.length) return;
+    try {
+      const preview = await api('/api/preview', { lines });
+      for (const p of preview.lines) {
+        const line = basket.find((l) => l.projectId === p.projectId);
+        if (line) line.deltaCents = p.deltaCents;
+      }
+      drawTotals();
+    } catch (err) { say(err.message, true); }
+  }, 300);
+}
+
+async function checkout(lines) {
+  say('Opening PayPal…'); // creating the order can take a few seconds
+  const { approveUrl } = await api('/api/checkout', { lines });
+  const url = new URL(approveUrl);
+  if (url.protocol !== 'https:' || !url.hostname.endsWith('.paypal.com')) throw new Error('Unexpected payment link.');
+  location.href = url.href;
+}
+
+$('projects').addEventListener('click', (event) => {
+  const id = event.target.closest('[data-add]')?.dataset.add;
+  if (!id) return;
+  const line = basket.find((l) => l.projectId === id);
+  if (line) line.amountCents = Math.min(line.amountCents + 500, 100000);
+  else if (basket.length < 8) basket.push({ projectId: id, name: S.projects.find((p) => p.id === id).name, amountCents: 500, reason: '', deltaCents: null });
+  else return say('A basket holds up to 8 projects.', true);
+  drawBasket();
+  refreshPreview();
+  say(`Added to your basket. ${basket.length} ${basket.length === 1 ? 'project' : 'projects'} in it.`);
+});
+
+$('basket').addEventListener('input', (event) => {
+  const line = basket.find((l) => l.projectId === event.target.dataset.amount);
+  if (!line) return;
+  const dollars = Math.floor(Number(event.target.value));
+  line.amountCents = dollars >= 1 && dollars <= 1000 ? dollars * 100 : 0;
+  line.deltaCents = null;
+  drawTotals();
+  refreshPreview();
+});
+
+// The note beside an amount field shows a bad value at once. Leaving the field with it still bad also says so out loud.
+$('basket').addEventListener('change', (event) => {
+  const line = basket.find((l) => l.projectId === event.target.dataset.amount);
+  if (line && !line.amountCents) say(`${line.name}: enter a whole dollar amount from $1 to $1,000.`, true);
+});
+
+$('basket').addEventListener('click', (event) => {
+  const id = event.target.closest('[data-remove]')?.dataset.remove;
+  if (!id) return;
+  const at = basket.findIndex((l) => l.projectId === id);
+  const { name } = basket[at];
+  basket = basket.filter((l) => l.projectId !== id);
+  drawBasket();
+  refreshPreview();
+  // The redraw removed the button that had focus. Focus goes to the next line, or to the heading when nothing is left.
+  (document.querySelectorAll('[data-remove]')[Math.min(at, basket.length - 1)] ?? $('give-h')).focus();
+  say(`Removed ${name}. ${basket.length ? `${basket.length} ${basket.length === 1 ? 'project' : 'projects'} left in your basket.` : 'Your basket is empty.'}`);
+});
+
+$('plan-form').addEventListener('submit', guard(async () => {
+  $('plan-note').textContent = 'Reading every project in the round…';
+  const plan = await api('/api/plan', { budgetUsd: Number($('budget').value), interests: $('interests').value }).catch((err) => {
+    $('plan-note').textContent = 'Ask for a plan, or add projects from the list.';
+    throw err;
+  });
+  basket = plan.lines.map(({ projectId, name, amountCents, reason, deltaCents }) => ({ projectId, name, amountCents, reason, deltaCents }));
+  $('plan-note').textContent = !basket.length ? 'Nothing in this round matched those words. Add projects from the list.'
+    : plan.source === 'llm' ? 'Planned by AI from your words. Change any amount before you pay.'
+    : 'The AI planner is unavailable, so this basket came from keyword matching. Change any amount before you pay.';
+  drawBasket();
+}));
+
+$('pay-btn').addEventListener('click', guard(() => checkout(basket.map(({ projectId, amountCents }) => ({ projectId, amountCents })))));
+
+$('pool-form').addEventListener('submit', guard(() => checkout([{ projectId: 'POOL', amountCents: Math.floor(Number($('pool-amount').value)) * 100 }])));
+
+const key = () => ({ 'x-admin-key': $('admin-key').value });
+
+$('fake-btn').addEventListener('click', guard(async () => {
+  await api('/api/admin/fake-crowd', {}, key());
+  await load();
+  const p = S.projects.find((x) => x.id === 'p8');
+  say(`100 fake donors added. If every payment counted, ${p.name} would take ${money(p.naiveMatchCents)}. It gets ${money(p.matchCents)}.`);
+}));
+
+$('close-btn').addEventListener('click', guard(async () => {
+  if (!confirm('Close the round and send the PayPal payout batch? This cannot be undone.')) return;
+  say('Closing the round and sending the payout…'); // also clears the error from a failed attempt while this one runs
+  // The round is closed before the payout is sent, so redraw even when the payout fails.
+  try { await api('/api/admin/close', { confirm: true }, key()); } finally { await load(); }
+  say('Round closed. Payout batch sent.');
+}));
+
+$('reset-btn').addEventListener('click', guard(async () => {
+  if (!confirm('Reset the demo? The local record of sandbox payments is cleared.')) return;
+  await api('/api/admin/reset', {}, key());
+  basket = [];
+  drawBasket();
+  await load();
+  say('Demo reset. A new round is open.');
+}));
+
+// Messages after PayPal sends the payer back.
+const back = new URLSearchParams(location.search);
+const notes = {
+  paid: 'Payment captured. It is in the ledger below.',
+  cancelled: 'Payment cancelled. Nothing was charged.',
+  round_closed: 'This round is closed. The payment was not captured.',
+  not_completed: 'PayPal did not complete the payment. Check your PayPal activity before trying again.',
+  capture_failed: 'The payment could not be confirmed. Check your PayPal activity before trying again.',
+  bad_order: 'That payment link is not valid.',
+};
+const note = back.has('paid') ? notes.paid : back.has('cancelled') ? notes.cancelled : notes[back.get('error')];
+if (note) history.replaceState(null, '', location.pathname);
+
+addEventListener('resize', scrollers);
+$('organizer').addEventListener('toggle', scrollers);
+
+// A held Enter key repeats the press. Focus stays on a button after its action, so without this one long press
+// would remove every basket line or repeat an organizer action. "Add $5" still repeats, as it always did.
+addEventListener('keydown', (event) => {
+  if (event.repeat && event.key === 'Enter' && event.target.closest('button:not([data-add])')) event.preventDefault();
+});
+
+// The outcome of a payment stays on the page and takes focus once the page has drawn.
+// A message set while the page is still loading is easy to miss, and screen readers often skip it.
+load().catch((err) => {
+  say(err.message, true);
+  $('loading')?.replaceChildren('The round could not be loaded. The page tries again every few seconds.');
+}).then(() => {
+  if (!note) return;
+  $('notice').textContent = note;
+  $('notice').classList.toggle('bad', back.has('error'));
+  $('notice').hidden = false;
+  $('notice').focus();
+});
+setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 5000);
+</script>
+</body>
+</html>

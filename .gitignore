@@ -1,0 +1,14 @@
+node_modules/
+.env
+data/
+
+# Secrets & Local Env
+.env
+.env.*
+!.env.example
+
+# Local AI & Media
+.claude/
+CLAUDE.md
+*.webm
+*.mp4

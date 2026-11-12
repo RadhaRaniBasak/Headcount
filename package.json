@@ -1,0 +1,21 @@
+{
+  "name": "headcount",
+  "version": "0.1.0",
+  "description": "Quadratic matching rounds on PayPal: matching that counts people, not dollars.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --env-file=.env --watch server.js",
+    "test": "node test.js",
+    "test:flow": "node scripts/flow-check.mjs",
+    "gate": "node --env-file=.env scripts/gate.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}
